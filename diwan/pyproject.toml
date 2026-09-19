@@ -1,0 +1,15 @@
+[project]
+name = "diwan"
+version = "0.1.0"
+description = "Turn daily work notes into structured Saviom timesheet entries."
+readme = "README.md"
+authors = [{ name = "Alkindi42", email = "alkindus42@gmail.com" }]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+diwan = "diwan:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
