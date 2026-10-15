@@ -81,7 +81,6 @@ For every output entry:
 - use only initiative values present in the provided catalog
 - use only task values present in the provided catalog
 - ensure the selected task belongs to the selected initiative
-- preserve the date associated with the daily log
 - return duration_minutes as a positive integer
 
 The human-readable names in the catalog are context for classification.
@@ -154,19 +153,35 @@ Note dated {date}:
             response.message.content
         ).entries
 
-        aggregated = defaultdict(int)
-        for entry in daily_entries:
-            key = (entry.initiative_value, entry.task_value)
-            aggregated[key] += entry.duration_minutes
+        for daily_entry in daily_entries:
+            daily_entry.date = date
 
-        for (initiative_value, task_value), duration in aggregated.items():
-            entries.append(
-                ClassifiedEntry(
-                    date=date,
-                    task_value=task_value,
-                    duration_minutes=duration,
-                    initiative_value=initiative_value,
-                )
+        entries.extend(daily_entries)
+
+    return aggregate_entries(entries)
+
+
+def aggregate_entries(
+    entries: list[ClassifiedEntry],
+) -> list[ClassifiedEntry]:
+    """Aggregate classified entries by date, initiative, and task."""
+
+    aggregated = defaultdict(int)
+
+    for entry in entries:
+        key = (entry.date, entry.initiative_value, entry.task_value)
+        aggregated[key] += entry.duration_minutes
+
+    aggregated_entries = []
+
+    for (date, initiative_value, task_value), duration in aggregated.items():
+        aggregated_entries.append(
+            ClassifiedEntry(
+                date=date,
+                task_value=task_value,
+                duration_minutes=duration,
+                initiative_value=initiative_value,
             )
+        )
 
-    return entries
+    return aggregated_entries
