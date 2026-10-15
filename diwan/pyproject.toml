@@ -5,7 +5,12 @@ description = "Turn daily work notes into structured Saviom timesheet entries."
 readme = "README.md"
 authors = [{ name = "Alkindi42", email = "alkindus42@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "ollama>=0.6.3",
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+    "typer>=0.27.2",
+]
 
 [project.scripts]
 diwan = "diwan:main"
