@@ -16,12 +16,14 @@ class ConfigModel(BaseModel):
 class Task(ConfigModel):
     name: str
     saviom_value: PositiveInt
+    description: str = ""
 
 
 class Initiative(ConfigModel):
     name: str
     saviom_value: PositiveInt
     tasks: list[Task]
+    description: str = ""
 
 
 class InitiativesConfig(ConfigModel):
