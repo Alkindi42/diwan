@@ -21,7 +21,7 @@ def main():
         ) from None
     except (ValidationError, yaml.YAMLError):
         raise typer.BadParameter(
-            "Invalid ~/diwan/config.yaml; check its YAML and saviom_timesheet_url (HTTPS, no credentials)."
+            "Invalid ~/diwan/config.yaml; check its YAML and saviom_timesheet_url (HTTPS)."
         ) from None
 
     notes = read_notes()

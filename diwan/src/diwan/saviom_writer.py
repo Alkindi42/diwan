@@ -21,14 +21,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from diwan.classifier import ClassifiedEntry
+from diwan.paths import DIWAN_DIR
 
-PROFILE_DIR = Path.home() / "diwan" / "browser-profile"
+PROFILE_DIR = DIWAN_DIR / "browser-profile"
 
 LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 WEEK_NAV_TIMEOUT_MS = 15 * 1000

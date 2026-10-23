@@ -22,7 +22,7 @@ saviom_timesheet_url: "https://saviom.example.com/SaviomERMWeb/Timesheet/frmTime
 
 Keep your initiative/task catalog in `~/diwan/initiatives.yaml` and daily
 Markdown notes in `~/diwan/` as `dd-mm-yyyy.md`. The browser stores your SSO
-session in `~/diwan/browser-profile/`; do not put credentials in the YAML.
+session in `~/diwan/browser-profile/`. Avoid storing credentials in YAML.
 
 Run `uv run diwan`. Diwan saves timesheet entries but never submits them.
 The writer currently expects the same Saviom weekly grid layout described in
