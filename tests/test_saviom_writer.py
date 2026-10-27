@@ -57,12 +57,14 @@ class WriterTests(unittest.TestCase):
         self, session, navigate, columns, fill, save, print_report
     ):
         session.return_value = MagicMock()
-        fill.side_effect = lambda page, entry, day, cols, report: report.problems.append(
-            "cell already occupied"
+        fill.side_effect = lambda page, entry, day, cols, report: (
+            report.problems.append("cell already occupied")
         )
 
         with redirect_stdout(io.StringIO()):
-            write_entries([entry("23-09-2026")], timesheet_url="https://example.com/timesheet")
+            write_entries(
+                [entry("23-09-2026")], timesheet_url="https://example.com/timesheet"
+            )
 
         save.assert_not_called()
         report = print_report.call_args.args[0]

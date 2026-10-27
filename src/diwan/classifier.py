@@ -1,7 +1,5 @@
-from collections import defaultdict
-
 from ollama import ChatResponse, chat
-from pydantic import BaseModel, ConfigDict, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 from diwan.initiative_loader import Initiative
 
@@ -20,6 +18,7 @@ Identify the meaningful work activities described in the log and classify each o
 
 - exactly one task key from the provided catalog (which identifies its initiative)
 - a duration in minutes
+- the numbered note line(s) describing that activity
 
 Choose the initiative first based on the purpose and context of the work.
 
@@ -46,6 +45,12 @@ Several related actions that represent one continuous piece of work may remain a
 Do not intentionally aggregate unrelated activities.
 
 Downstream code may aggregate entries that resolve to the same date, initiative, and task.
+
+Each note line is prefixed with its original line number in square brackets.
+Return source_lines with the line number(s) that contributed to each activity.
+Use the same line number for multiple activities from one line; include all
+relevant line numbers when an activity spans multiple lines. Never invent a
+line number or copy/paraphrase the note text in the output.
 
 ## Duration
 
@@ -79,6 +84,7 @@ For every output entry:
 
 - return exactly one task key from the provided catalog
 - return duration_minutes as a positive integer
+- return at least one source line number from the provided note
 
 Python resolves task keys to Saviom identifiers after classification. Do not output dates or numeric identifiers.
 
@@ -104,11 +110,13 @@ class ClassifiedEntry(ConfigModel):
     task_value: PositiveInt
     initiative_value: PositiveInt
     duration_minutes: PositiveInt
+    source_lines: list[PositiveInt] = Field(default_factory=list)
 
 
 class CatalogActivity(ConfigModel):
     task_key: str
     duration_minutes: PositiveInt
+    source_lines: list[PositiveInt] = Field(min_length=1)
 
 
 class CatalogResult(ConfigModel):
@@ -143,16 +151,27 @@ def classify(
         return []
 
     catalog, choices = _catalog(initiatives)
-    # Restrict the model's choices to this catalog without asking it to
-    # generate Saviom IDs. Python maps the selected key to both IDs below.
-    schema = CatalogResult.model_json_schema()
-    task_key_schema = schema["$defs"]["CatalogActivity"]["properties"]["task_key"]
-    task_key_schema["enum"] = list(choices)
-
     entries: list[ClassifiedEntry] = []
     for date, note in notes.items():
+        numbered_lines = {
+            number: line
+            for number, line in enumerate(note.splitlines(), start=1)
+            if line.strip()
+        }
+        if not numbered_lines:
+            continue
+
+        # The model selects catalog keys and note line numbers, never Saviom IDs.
+        schema = CatalogResult.model_json_schema()
+        activity_schema = schema["$defs"]["CatalogActivity"]["properties"]
+        activity_schema["task_key"]["enum"] = list(choices)
+        activity_schema["source_lines"]["items"]["enum"] = list(numbered_lines)
+        numbered_note = "\n".join(
+            f"[{number}] {line}" for number, line in numbered_lines.items()
+        )
         prompt = (
-            f"Available initiatives and tasks:\n{catalog}\n\nNote dated {date}:\n{note}"
+            f"Available initiatives and tasks:\n{catalog}\n\n"
+            f"Note dated {date}:\n{numbered_note}"
         )
         response: ChatResponse = chat(
             model="qwen3:8b",
@@ -176,6 +195,11 @@ def classify(
                 raise ValueError(
                     f"Ollama returned unknown task key {activity.task_key!r}"
                 )
+            for number in activity.source_lines:
+                if number not in numbered_lines:
+                    raise ValueError(
+                        f"Ollama returned unknown source line {number} for {date}"
+                    )
             initiative_value, task_value = selected
             entries.append(
                 ClassifiedEntry(
@@ -183,6 +207,7 @@ def classify(
                     initiative_value=initiative_value,
                     task_value=task_value,
                     duration_minutes=activity.duration_minutes,
+                    source_lines=sorted(set(activity.source_lines)),
                 )
             )
 
@@ -194,22 +219,17 @@ def aggregate_entries(
 ) -> list[ClassifiedEntry]:
     """Aggregate classified entries by date, initiative, and task."""
 
-    aggregated = defaultdict(int)
+    aggregated: dict[tuple[str, int, int], ClassifiedEntry] = {}
 
     for entry in entries:
         key = (entry.date, entry.initiative_value, entry.task_value)
-        aggregated[key] += entry.duration_minutes
-
-    aggregated_entries = []
-
-    for (date, initiative_value, task_value), duration in aggregated.items():
-        aggregated_entries.append(
-            ClassifiedEntry(
-                date=date,
-                task_value=task_value,
-                duration_minutes=duration,
-                initiative_value=initiative_value,
+        if key not in aggregated:
+            aggregated[key] = entry.model_copy(deep=True)
+        else:
+            current = aggregated[key]
+            current.duration_minutes += entry.duration_minutes
+            current.source_lines = sorted(
+                set(current.source_lines + entry.source_lines)
             )
-        )
 
-    return aggregated_entries
+    return list(aggregated.values())
