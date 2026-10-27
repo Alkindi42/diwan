@@ -10,7 +10,7 @@ You are a timesheet classifier.
 
 Your job is to interpret one daily work log and convert it into structured timesheet entries using only the initiatives and tasks provided in the input catalog.
 
-The catalog is the source of truth. Never invent an initiative, task, identifier, or relationship that is not present in the catalog.
+The catalog is the source of truth. Never invent an initiative, task, or task key that is not present in the catalog.
 
 ## Classification
 
@@ -18,15 +18,14 @@ A daily log may contain one or multiple distinct work activities.
 
 Identify the meaningful work activities described in the log and classify each one into:
 
-- exactly one initiative
-- exactly one task belonging to that initiative
+- exactly one task key from the provided catalog (which identifies its initiative)
 - a duration in minutes
 
 Choose the initiative first based on the purpose and context of the work.
 
 Then choose the task that best represents the actual work performed within that initiative.
 
-Only select tasks that belong to the selected initiative.
+Return its catalog key, not a task name or a numeric Saviom identifier.
 
 Classify according to the actual purpose and outcome of the work, not isolated keywords.
 
@@ -78,14 +77,10 @@ Do not force the daily total to match a predetermined number of working hours un
 
 For every output entry:
 
-- use only initiative values present in the provided catalog
-- use only task values present in the provided catalog
-- ensure the selected task belongs to the selected initiative
+- return exactly one task key from the provided catalog
 - return duration_minutes as a positive integer
 
-The human-readable names in the catalog are context for classification.
-
-The numeric values are the identifiers that must be returned.
+Python resolves task keys to Saviom identifiers after classification. Do not output dates or numeric identifiers.
 
 ## Output
 
@@ -111,37 +106,61 @@ class ClassifiedEntry(ConfigModel):
     duration_minutes: PositiveInt
 
 
-class ClassifiedResult(ConfigModel):
-    entries: list[ClassifiedEntry]
+class CatalogActivity(ConfigModel):
+    task_key: str
+    duration_minutes: PositiveInt
 
 
-# TODO: send context instead of initiatives
+class CatalogResult(ConfigModel):
+    entries: list[CatalogActivity]
+
+
+def _catalog(initiatives: list[Initiative]) -> tuple[str, dict[str, tuple[int, int]]]:
+    """Present the catalog as readable choices; keep Saviom IDs in Python."""
+    lines = []
+    choices: dict[str, tuple[int, int]] = {}
+
+    for initiative in initiatives:
+        lines.append(f"Initiative: {initiative.name}")
+        if initiative.description:
+            lines.append(f"  {initiative.description.strip()}")
+        for task in initiative.tasks:
+            key = f"t{len(choices) + 1}"
+            choices[key] = (initiative.saviom_value, task.saviom_value)
+            lines.append(f"  {key}: {task.name}")
+            if task.description:
+                lines.append(f"    {task.description.strip()}")
+
+    if not choices:
+        raise ValueError("The initiative catalog contains no tasks")
+    return "\n".join(lines), choices
+
+
 def classify(
     notes: dict[str, str], initiatives: list[Initiative]
 ) -> list[ClassifiedEntry]:
+    if not notes:
+        return []
+
+    catalog, choices = _catalog(initiatives)
+    # Restrict the model's choices to this catalog without asking it to
+    # generate Saviom IDs. Python maps the selected key to both IDs below.
+    schema = CatalogResult.model_json_schema()
+    task_key_schema = schema["$defs"]["CatalogActivity"]["properties"]["task_key"]
+    task_key_schema["enum"] = list(choices)
 
     entries: list[ClassifiedEntry] = []
     for date, note in notes.items():
-        prompt = f"""
-Available initiatives and tasks:
-{initiatives}
-
-Note dated {date}:
-{note}
-    """
+        prompt = (
+            f"Available initiatives and tasks:\n{catalog}\n\nNote dated {date}:\n{note}"
+        )
         response: ChatResponse = chat(
             model="qwen3:8b",
             messages=[
-                {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
             ],
-            format=ClassifiedResult.model_json_schema(),
+            format=schema,
             options={"temperature": 0},
             think=True,
         )
@@ -149,14 +168,23 @@ Note dated {date}:
         if response.message.content is None:
             raise ValueError("Ollama returned an empty response")
 
-        daily_entries = ClassifiedResult.model_validate_json(
+        for activity in CatalogResult.model_validate_json(
             response.message.content
-        ).entries
-
-        for daily_entry in daily_entries:
-            daily_entry.date = date
-
-        entries.extend(daily_entries)
+        ).entries:
+            selected = choices.get(activity.task_key)
+            if selected is None:
+                raise ValueError(
+                    f"Ollama returned unknown task key {activity.task_key!r}"
+                )
+            initiative_value, task_value = selected
+            entries.append(
+                ClassifiedEntry(
+                    date=date,
+                    initiative_value=initiative_value,
+                    task_value=task_value,
+                    duration_minutes=activity.duration_minutes,
+                )
+            )
 
     return aggregate_entries(entries)
 
