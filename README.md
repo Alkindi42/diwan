@@ -59,12 +59,22 @@ For example, `~/diwan/12-05-2026.md` could contain:
 The browser stores your SSO session in `~/diwan/browser-profile/`. Avoid
 storing credentials in YAML.
 
-Run `uv run diwan` after replacing the example values with your own. Diwan
-prints each classified entry with its original note lines and lists any lines
-not referenced by the classifier. It then
-saves the timesheet entries without asking for confirmation; it never submits
-them. The preview includes your note text, so be mindful when sharing terminal
-output or logs.
+Run `uv run diwan` after replacing the example values with your own. By
+default, Diwan reads unprocessed daily notes from the current local Monday–Sunday
+week. To work on another week, use `uv run diwan --week 2026-05-11` (any date in
+that week, in `YYYY-MM-DD` format).
+
+Diwan prints each classified entry with its original note lines and lists any
+lines not referenced by the classifier. It then saves the timesheet entries
+without asking for confirmation; it never submits them. The preview includes
+your note text, so be mindful when sharing terminal output or logs.
+
+When every entry for a day is saved (or already matches Saviom) and no work
+bullet was left unclassified, Diwan renames `12-05-2026.md` to
+`12-05-2026.processed.md`. It leaves notes unchanged on conflicts or save
+errors. Markdown headings may be unreferenced without blocking the rename.
+To correct a processed note, rename it back to `dd-mm-yyyy.md` and rerun that
+week; existing conflicting Saviom cells are never overwritten.
 
 The writer currently expects the Saviom weekly grid layout described in
 `src/diwan/saviom_writer.py`; other installations may require UI adjustments.

@@ -21,6 +21,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -47,7 +48,9 @@ ENTRY_DATE_FORMAT = "%d-%m-%Y"
 @dataclass
 class WriteReport:
     written: list[str] = field(default_factory=list)
+    already_present: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    completed_dates: set[str] = field(default_factory=set)
 
 
 @contextmanager
@@ -106,7 +109,7 @@ def _wait_for_timesheet(page: Page) -> None:
 
 def write_entries(
     classified_entries: list[ClassifiedEntry], timesheet_url: str
-) -> None:
+) -> WriteReport:
     """Fill and save the Saviom timesheet with the given entries.
 
     Never submits. Existing non-empty day cells are never overwritten;
@@ -114,7 +117,7 @@ def write_entries(
     """
     if not classified_entries:
         print("No entries to write.")
-        return
+        return WriteReport()
 
     weeks: dict[date, list[tuple[ClassifiedEntry, date]]] = defaultdict(list)
     for entry in classified_entries:
@@ -129,25 +132,28 @@ def write_entries(
             _goto_week(page, monday)
             day_columns = _day_columns(page)
             week_report = WriteReport()
+            good_dates = {entry.date for entry, _ in weeks[monday]}
 
             for entry, entry_date in weeks[monday]:
-                _write_entry(page, entry, entry_date, day_columns, week_report)
+                if not _write_entry(page, entry, entry_date, day_columns, week_report):
+                    good_dates.discard(entry.date)
 
             report.problems.extend(week_report.problems)
-            if not week_report.written:
-                continue
+            report.already_present.extend(week_report.already_present)
+            if week_report.written:
+                problem = _save(page)
+                if problem:
+                    report.problems.append(
+                        f"Week of {monday}: save failed ({problem}); "
+                        f"{len(week_report.written)} filled cell(s) not confirmed saved"
+                    )
+                    break  # Stop processing further weeks after a failed save.
+                report.written.extend(week_report.written)
 
-            problem = _save(page)
-            if problem:
-                report.problems.append(
-                    f"Week of {monday}: save failed ({problem}); "
-                    f"{len(week_report.written)} filled cell(s) not confirmed saved"
-                )
-                break  # Stop processing further weeks after a failed save.
-
-            report.written.extend(week_report.written)
+            report.completed_dates.update(good_dates)
 
     _print_report(report)
+    return report
 
 
 # --- orchestration helpers ---------------------------------------------------
@@ -159,7 +165,8 @@ def _write_entry(
     entry_date: date,
     day_columns: dict[date, int],
     report: WriteReport,
-) -> None:
+) -> bool:
+    """Record one cell; return whether it was written or already matched."""
     label = (
         f"{entry.date} | initiative {entry.initiative_value} "
         f"/ task {entry.task_value} ({_to_hours(entry.duration_minutes)}h)"
@@ -168,26 +175,30 @@ def _write_entry(
     col = day_columns.get(entry_date)
     if col is None:
         report.problems.append(f"{label}: date not visible on the current week page")
-        return
+        return False
 
     row = _find_row(page, entry.initiative_value, entry.task_value)
     if row is None:
         report.problems.append(f"{label}: no empty grid row available")
-        return
+        return False
 
     problem = _select_initiative_and_task(
         page, row, entry.initiative_value, entry.task_value
     )
     if problem:
         report.problems.append(f"{label}: {problem}")
-        return
+        return False
 
-    problem = _fill_day_cell(page, row, col, entry.duration_minutes)
+    was_written, problem = _fill_day_cell(page, row, col, entry.duration_minutes)
     if problem:
         report.problems.append(f"{label}: {problem}")
-        return
+        return False
 
-    report.written.append(f"{label} -> row {row}, column {col}")
+    if was_written:
+        report.written.append(f"{label} -> row {row}, column {col}")
+    else:
+        report.already_present.append(label)
+    return True
 
 
 def _parse_entry_date(raw: str) -> date:
@@ -306,31 +317,35 @@ def _select_initiative_and_task(
     return None
 
 
-def _fill_day_cell(page: Page, row: int, col: int, duration_minutes: int) -> str | None:
-    """Write decimal hours into a day cell. Returns a problem or None."""
+def _fill_day_cell(
+    page: Page, row: int, col: int, duration_minutes: int
+) -> tuple[bool, str | None]:
+    """Return (was_written, problem); never overwrite an occupied cell."""
     cell = page.locator(f'[id="txtGrid,{row},{col}"]')
     hours = _to_hours(duration_minutes)
-
     existing = cell.input_value().strip()
-    if existing not in EMPTY_SELECT_VALUES:
+
+    if existing:
         try:
-            is_zero = float(existing) == 0.0
-        except ValueError:
-            is_zero = False
-        if not is_zero:
-            return f"cell already contains {existing!r}; left untouched"
+            value = Decimal(existing)
+        except InvalidOperation:
+            return False, f"cell already contains {existing!r}; left untouched"
+        if value != 0:
+            if value == Decimal(hours):
+                return False, None
+            return False, f"cell already contains {existing!r}; expected {hours}h"
 
     cell.fill(hours)
     cell.press("Tab")
 
+    actual = cell.input_value().strip()
     try:
-        actual = float(cell.input_value().strip())
-    except ValueError:
-        return f"could not read back cell value {cell.input_value()!r}"
-    if abs(actual - float(hours)) > 0.005:
-        return f"cell shows {actual}h after writing {hours}h"
+        if abs(Decimal(actual) - Decimal(hours)) > Decimal("0.005"):
+            return False, f"cell shows {actual!r} after writing {hours}h"
+    except InvalidOperation:
+        return False, f"could not read back cell value {actual!r}"
 
-    return None
+    return True, None
 
 
 # --- save & dialogs ----------------------------------------------------------
@@ -370,6 +385,9 @@ def _print_report(report: WriteReport) -> None:
     print(f"\nSaved {count} {'cell' if count == 1 else 'cells'}.")
     for line in report.written:
         print(f"  + {line}")
+
+    if report.already_present:
+        print(f"\n{len(report.already_present)} cell(s) already matched Saviom.")
 
     if report.problems:
         print("\nNeeds attention:")
