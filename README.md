@@ -81,4 +81,4 @@ The writer currently expects the Saviom weekly grid layout described in
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE).
