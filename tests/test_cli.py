@@ -4,8 +4,10 @@ from datetime import date
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+from typer.testing import CliRunner
+
 from diwan.classifier import ClassifiedEntry
-from diwan.cli import main
+from diwan.cli import app, main
 from diwan.config import AppConfig
 from diwan.initiative_loader import Initiative, Task
 from diwan.saviom_writer import WriteReport
@@ -62,6 +64,45 @@ class PreviewTests(unittest.TestCase):
         write_entries.assert_called_once_with(
             classify.return_value, timesheet_url="https://example.com/timesheet"
         )
+
+    @patch("diwan.cli.mark_note_processed")
+    @patch("diwan.cli.write_entries")
+    @patch("diwan.cli.classify")
+    @patch("diwan.cli.load_initiatives")
+    @patch("diwan.cli.read_notes")
+    @patch("diwan.cli.load_config")
+    def test_dry_run_previews_without_config_or_saviom(
+        self, load_config, read_notes, load_initiatives, classify, write_entries, mark_processed
+    ):
+        note = "- Investigated alert (1h)"
+        read_notes.return_value = {"27-10-2026": note}
+        load_initiatives.return_value = [
+            Initiative(
+                name="Example Platform",
+                saviom_value=12345,
+                tasks=[Task(name="Maintenance", saviom_value=12347)],
+            )
+        ]
+        classify.return_value = [
+            ClassifiedEntry(
+                date="27-10-2026",
+                initiative_value=12345,
+                task_value=12347,
+                duration_minutes=60,
+                source_lines=[1],
+            )
+        ]
+
+        result = CliRunner().invoke(app, ["--dry-run", "--week", "2026-10-27"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("[1] - Investigated alert (1h)", result.output)
+        self.assertIn("Dry run: no entries saved; notes unchanged.", result.output)
+        read_notes.assert_called_once_with(week=date(2026, 10, 27))
+        classify.assert_called_once_with(read_notes.return_value, load_initiatives.return_value)
+        load_config.assert_not_called()
+        write_entries.assert_not_called()
+        mark_processed.assert_not_called()
 
     @patch("diwan.cli.mark_note_processed")
     @patch("diwan.cli.write_entries")

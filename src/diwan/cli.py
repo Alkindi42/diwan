@@ -1,5 +1,6 @@
 import re
 from datetime import date
+from typing import Annotated
 
 import typer
 import yaml
@@ -17,23 +18,30 @@ WORK_BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 
 @app.command()
 def main(
-    week: str = typer.Option("", "--week", help="Any date in the week (YYYY-MM-DD)."),
+    week: Annotated[
+        str, typer.Option("--week", help="Any date in the week (YYYY-MM-DD).")
+    ] = "",
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Preview without saving or marking notes processed.")
+    ] = False,
 ):
-    try:
-        config = load_config()
-    except FileNotFoundError:
-        raise typer.BadParameter(
-            "Missing ~/diwan/config.yaml; see README.md for setup."
-        ) from None
-    except (ValidationError, yaml.YAMLError):
-        raise typer.BadParameter(
-            "Invalid ~/diwan/config.yaml; check its YAML and saviom_timesheet_url (HTTPS)."
-        ) from None
-
     try:
         selected_week = date.fromisoformat(week) if week else None
     except ValueError:
         raise typer.BadParameter("--week must be YYYY-MM-DD") from None
+
+    timesheet_url = None
+    if not dry_run:
+        try:
+            timesheet_url = str(load_config().saviom_timesheet_url)
+        except FileNotFoundError:
+            raise typer.BadParameter(
+                "Missing ~/diwan/config.yaml; see README.md for setup."
+            ) from None
+        except (ValidationError, yaml.YAMLError):
+            raise typer.BadParameter(
+                "Invalid ~/diwan/config.yaml; check its YAML and saviom_timesheet_url (HTTPS)."
+            ) from None
 
     notes = read_notes(week=selected_week)
     if not notes:
@@ -47,7 +55,12 @@ def main(
     if blocked_dates:
         print(f"Unreferenced work bullets; not marking processed: {', '.join(sorted(blocked_dates))}")
 
-    report = write_entries(classified_entries, timesheet_url=str(config.saviom_timesheet_url))
+    if dry_run:
+        print("Dry run: no entries saved; notes unchanged.")
+        return
+
+    assert timesheet_url is not None
+    report = write_entries(classified_entries, timesheet_url=timesheet_url)
     for day in sorted(report.completed_dates - blocked_dates):
         try:
             mark_note_processed(day, notes[day])

@@ -64,6 +64,10 @@ default, Diwan reads unprocessed daily notes from the current local Monday–Sun
 week. To work on another week, use `uv run diwan --week 2026-05-11` (any date in
 that week, in `YYYY-MM-DD` format).
 
+Use `uv run diwan --dry-run` to preview classifications without opening Saviom,
+saving entries, or renaming notes. It requires Ollama and `initiatives.yaml`,
+but not `config.yaml`.
+
 Diwan prints each classified entry with its original note lines and lists any
 lines not referenced by the classifier. It then saves the timesheet entries
 without asking for confirmation; it never submits them. The preview includes
