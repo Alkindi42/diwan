@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 from diwan.initiative_loader import Initiative
 
+DEFAULT_MODEL = "qwen3:8b"
+
 SYSTEM_PROMPT = """
 You are a timesheet classifier.
 
@@ -145,7 +147,7 @@ def _catalog(initiatives: list[Initiative]) -> tuple[str, dict[str, tuple[int, i
 
 
 def classify(
-    notes: dict[str, str], initiatives: list[Initiative]
+    notes: dict[str, str], initiatives: list[Initiative], model: str = DEFAULT_MODEL
 ) -> list[ClassifiedEntry]:
     if not notes:
         return []
@@ -174,7 +176,7 @@ def classify(
             f"Note dated {date}:\n{numbered_note}"
         )
         response: ChatResponse = chat(
-            model="qwen3:8b",
+            model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

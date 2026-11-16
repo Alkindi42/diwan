@@ -66,7 +66,8 @@ that week, in `YYYY-MM-DD` format).
 
 Use `uv run diwan --dry-run` to preview classifications without opening Saviom,
 saving entries, or renaming notes. It requires Ollama and `initiatives.yaml`,
-but not `config.yaml`.
+but not `config.yaml`. Use `--model MODEL` to choose another installed Ollama
+model (default: `qwen3:8b`); it must support structured output and thinking.
 
 Diwan prints each classified entry with its original note lines and lists any
 lines not referenced by the classifier. It then saves the timesheet entries

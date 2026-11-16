@@ -6,7 +6,7 @@ import typer
 import yaml
 from pydantic import ValidationError
 
-from diwan.classifier import ClassifiedEntry, classify
+from diwan.classifier import DEFAULT_MODEL, ClassifiedEntry, classify
 from diwan.config import load_config
 from diwan.initiative_loader import Initiative, load_initiatives
 from diwan.note_reader import mark_note_processed, read_notes
@@ -24,7 +24,14 @@ def main(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Preview without saving or marking notes processed.")
     ] = False,
+    model: Annotated[
+        str, typer.Option("--model", help="Ollama model used for classification.")
+    ] = DEFAULT_MODEL,
 ):
+    model = model.strip()
+    if not model:
+        raise typer.BadParameter("--model must not be empty")
+
     try:
         selected_week = date.fromisoformat(week) if week else None
     except ValueError:
@@ -49,7 +56,7 @@ def main(
         return
 
     initiatives = load_initiatives()
-    classified_entries = classify(notes, initiatives)
+    classified_entries = classify(notes, initiatives, model=model)
     _show_classification(classified_entries, notes, initiatives)
     blocked_dates = _unreferenced_work_dates(notes, classified_entries)
     if blocked_dates:

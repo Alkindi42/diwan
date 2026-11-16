@@ -52,7 +52,9 @@ class ClassifierTests(unittest.TestCase):
         )
 
         entries = classify(
-            {"27-10-2026": "Meeting A\nMeeting B\n\nTraining"}, initiatives
+            {"27-10-2026": "Meeting A\nMeeting B\n\nTraining"},
+            initiatives,
+            model="example-model:latest",
         )
 
         self.assertEqual(
@@ -72,6 +74,7 @@ class ClassifierTests(unittest.TestCase):
             ],
         )
         call = chat.call_args.kwargs
+        self.assertEqual(call["model"], "example-model:latest")
         schema = call["format"]["$defs"]["CatalogActivity"]["properties"]["task_key"]
         self.assertEqual(schema["enum"], ["t1", "t2", "t3"])
         source_schema = call["format"]["$defs"]["CatalogActivity"]["properties"][

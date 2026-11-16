@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from diwan.classifier import ClassifiedEntry
+from diwan.classifier import DEFAULT_MODEL, ClassifiedEntry
 from diwan.cli import app, main
 from diwan.config import AppConfig
 from diwan.initiative_loader import Initiative, Task
@@ -58,6 +58,9 @@ class PreviewTests(unittest.TestCase):
 
         mark_processed.assert_not_called()  # Unreferenced work bullet.
         read_notes.assert_called_once_with(week=None)
+        classify.assert_called_once_with(
+            read_notes.return_value, load_initiatives.return_value, model=DEFAULT_MODEL
+        )
         self.assertIn("Example Platform / Management | 80 min", output.getvalue())
         self.assertIn("Unreferenced note lines in 27-10-2026:", output.getvalue())
         self.assertIn("[2] - Unrelated work", output.getvalue())
@@ -93,13 +96,19 @@ class PreviewTests(unittest.TestCase):
             )
         ]
 
-        result = CliRunner().invoke(app, ["--dry-run", "--week", "2026-10-27"])
+        result = CliRunner().invoke(
+            app, ["--dry-run", "--model", "example-model:latest", "--week", "2026-10-27"]
+        )
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("[1] - Investigated alert (1h)", result.output)
         self.assertIn("Dry run: no entries saved; notes unchanged.", result.output)
         read_notes.assert_called_once_with(week=date(2026, 10, 27))
-        classify.assert_called_once_with(read_notes.return_value, load_initiatives.return_value)
+        classify.assert_called_once_with(
+            read_notes.return_value,
+            load_initiatives.return_value,
+            model="example-model:latest",
+        )
         load_config.assert_not_called()
         write_entries.assert_not_called()
         mark_processed.assert_not_called()
